@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,21 +8,83 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import Icon from '@/components/ui/icon';
+import { useContacts } from '@/hooks/useContacts';
+import { useWebRTC } from '@/hooks/useWebRTC';
+import type { Contact, Message } from '@/lib/store';
 
 type Page = 'landing' | 'auth' | 'dashboard' | 'call' | 'profile' | 'settings';
 
-const contacts = [
-  { id: 1, name: 'Александра Петрова', status: 'online', avatar: '' },
-  { id: 2, name: 'Дмитрий Иванов', status: 'offline', avatar: '' },
-  { id: 3, name: 'Мария Смирнова', status: 'online', avatar: '' },
-  { id: 4, name: 'Сергей Козлов', status: 'away', avatar: '' },
-];
+const SMILES = ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '😎', '🤓', '🧐'];
 
 export default function Index() {
   const [currentPage, setCurrentPage] = useState<Page>('landing');
   const [isLogin, setIsLogin] = useState(true);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messageInput, setMessageInput] = useState('');
+  const [showChat, setShowChat] = useState(false);
+  const [isAddContactOpen, setIsAddContactOpen] = useState(false);
+  const [newContactName, setNewContactName] = useState('');
+  const [newContactEmail, setNewContactEmail] = useState('');
+  
+  const { contacts, addContact, deleteContact } = useContacts();
+  const { localStream, isCameraOn, isMicOn, toggleCamera, toggleMic, stopLocalStream } = useWebRTC();
+  
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  const handleAddContact = () => {
+    if (newContactName && newContactEmail) {
+      addContact({
+        name: newContactName,
+        email: newContactEmail,
+        status: 'offline',
+      });
+      setNewContactName('');
+      setNewContactEmail('');
+      setIsAddContactOpen(false);
+    }
+  };
+
+  const handleStartCall = (contact: Contact) => {
+    setSelectedContact(contact);
+    setCurrentPage('call');
+    setMessages([]);
+  };
+
+  const handleEndCall = () => {
+    setCurrentPage('dashboard');
+    setSelectedContact(null);
+    setShowChat(false);
+    stopLocalStream();
+  };
+
+  const sendMessage = () => {
+    if (messageInput.trim()) {
+      const newMessage: Message = {
+        id: crypto.randomUUID(),
+        sender: 'me',
+        text: messageInput,
+        timestamp: Date.now(),
+      };
+      setMessages([...messages, newMessage]);
+      setMessageInput('');
+    }
+  };
+
+  const insertSmile = (smile: string) => {
+    setMessageInput(prev => prev + smile);
+  };
 
   const LandingPage = () => (
     <div className="min-h-screen flex flex-col">
@@ -240,7 +302,7 @@ export default function Index() {
         </div>
 
         <div className="grid md:grid-cols-2 gap-6 mb-8">
-          <Card className="glass-effect border-white/10 hover-scale cursor-pointer" onClick={() => setCurrentPage('call')}>
+          <Card className="glass-effect border-white/10 hover-scale cursor-pointer">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Icon name="Video" size={24} className="text-primary" />
@@ -250,54 +312,124 @@ export default function Index() {
             </CardHeader>
           </Card>
 
-          <Card className="glass-effect border-white/10 hover-scale cursor-pointer">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Icon name="UserPlus" size={24} className="text-accent" />
-                Добавить контакт
-              </CardTitle>
-              <CardDescription>Пригласите друзей в Favoro</CardDescription>
-            </CardHeader>
-          </Card>
+          <Dialog open={isAddContactOpen} onOpenChange={setIsAddContactOpen}>
+            <DialogTrigger asChild>
+              <Card className="glass-effect border-white/10 hover-scale cursor-pointer">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Icon name="UserPlus" size={24} className="text-accent" />
+                    Добавить контакт
+                  </CardTitle>
+                  <CardDescription>Добавьте друзей в Favoro</CardDescription>
+                </CardHeader>
+              </Card>
+            </DialogTrigger>
+            <DialogContent className="glass-effect border-white/10">
+              <DialogHeader>
+                <DialogTitle>Добавить новый контакт</DialogTitle>
+                <DialogDescription>Заполните информацию о контакте</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="contact-name">Имя</Label>
+                  <Input
+                    id="contact-name"
+                    placeholder="Имя контакта"
+                    value={newContactName}
+                    onChange={(e) => setNewContactName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contact-email">Email</Label>
+                  <Input
+                    id="contact-email"
+                    type="email"
+                    placeholder="email@example.com"
+                    value={newContactEmail}
+                    onChange={(e) => setNewContactEmail(e.target.value)}
+                  />
+                </div>
+                <Button
+                  className="w-full gradient-purple-pink text-white hover:opacity-90"
+                  onClick={handleAddContact}
+                >
+                  <Icon name="UserPlus" size={18} className="mr-2" />
+                  Добавить
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
 
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold">Контакты</h2>
+            <h2 className="text-2xl font-bold">Контакты ({contacts.length})</h2>
             <div className="relative w-64">
               <Icon name="Search" size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
               <Input placeholder="Поиск контактов..." className="pl-10 glass-effect border-white/10" />
             </div>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {contacts.map((contact) => (
-              <Card key={contact.id} className="glass-effect border-white/10 hover-scale cursor-pointer">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="relative">
-                      <Avatar className="w-16 h-16">
-                        <AvatarFallback className="gradient-blue-purple text-white text-lg font-semibold">
-                          {contact.name.split(' ').map(n => n[0]).join('')}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-card ${
-                        contact.status === 'online' ? 'bg-green-500' : 
-                        contact.status === 'away' ? 'bg-yellow-500' : 'bg-gray-500'
-                      }`} />
+          {contacts.length === 0 ? (
+            <Card className="glass-effect border-white/10">
+              <CardContent className="p-12 text-center">
+                <Icon name="Users" size={48} className="mx-auto mb-4 text-muted-foreground" />
+                <h3 className="text-xl font-semibold mb-2">Нет контактов</h3>
+                <p className="text-muted-foreground mb-4">Добавьте ваш первый контакт, чтобы начать звонки</p>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsAddContactOpen(true)}
+                  className="border-white/20 hover:bg-white/10"
+                >
+                  <Icon name="UserPlus" size={18} className="mr-2" />
+                  Добавить контакт
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {contacts.map((contact) => (
+                <Card key={contact.id} className="glass-effect border-white/10 hover-scale">
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-4">
+                      <div className="relative">
+                        <Avatar className="w-16 h-16">
+                          <AvatarFallback className="gradient-blue-purple text-white text-lg font-semibold">
+                            {contact.name.split(' ').map(n => n[0]).join('')}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-card ${
+                          contact.status === 'online' ? 'bg-green-500' : 
+                          contact.status === 'away' ? 'bg-yellow-500' : 'bg-gray-500'
+                        }`} />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-semibold">{contact.name}</h3>
+                        <p className="text-sm text-muted-foreground">{contact.email}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="icon"
+                          className="gradient-purple-pink hover:opacity-90"
+                          onClick={() => handleStartCall(contact)}
+                        >
+                          <Icon name="Video" size={18} />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="border-white/20 hover:bg-red-500/20"
+                          onClick={() => deleteContact(contact.id)}
+                        >
+                          <Icon name="Trash2" size={18} />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold">{contact.name}</h3>
-                      <p className="text-sm text-muted-foreground capitalize">{contact.status}</p>
-                    </div>
-                    <Button size="icon" className="gradient-purple-pink hover:opacity-90">
-                      <Icon name="Video" size={18} />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       </main>
     </div>
@@ -306,44 +438,174 @@ export default function Index() {
   const CallPage = () => (
     <div className="min-h-screen flex flex-col bg-black">
       <div className="flex-1 relative">
-        <div className="absolute inset-0 bg-gradient-to-br from-purple-900/30 to-blue-900/30 flex items-center justify-center">
-          <div className="text-center">
-            <Avatar className="w-32 h-32 mx-auto mb-4">
-              <AvatarFallback className="gradient-purple-pink text-white text-4xl font-bold">АП</AvatarFallback>
-            </Avatar>
-            <h2 className="text-3xl font-bold mb-2">Александра Петрова</h2>
-            <p className="text-muted-foreground">Звоним...</p>
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover bg-gradient-to-br from-purple-900/30 to-blue-900/30"
+        />
+        
+        {!localStream && (
+          <div className="absolute inset-0 bg-gradient-to-br from-purple-900/30 to-blue-900/30 flex items-center justify-center">
+            <div className="text-center">
+              <Avatar className="w-32 h-32 mx-auto mb-4">
+                <AvatarFallback className="gradient-purple-pink text-white text-4xl font-bold">
+                  {selectedContact?.name.split(' ').map(n => n[0]).join('') || '?'}
+                </AvatarFallback>
+              </Avatar>
+              <h2 className="text-3xl font-bold mb-2">{selectedContact?.name}</h2>
+              <p className="text-muted-foreground">Звоним...</p>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="absolute top-6 right-6">
           <Card className="w-48 h-36 glass-effect border-white/10 overflow-hidden">
-            <div className="w-full h-full bg-gradient-to-br from-purple-600 to-blue-600" />
+            {isCameraOn && localStream ? (
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
+                <Icon name="VideoOff" size={32} className="text-white" />
+              </div>
+            )}
           </Card>
         </div>
+
+        {showChat && (
+          <div className="absolute left-6 top-6 bottom-24 w-96">
+            <Card className="glass-effect border-white/10 h-full flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between pb-4">
+                <CardTitle className="text-lg">Чат</CardTitle>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => setShowChat(false)}
+                  className="h-8 w-8"
+                >
+                  <Icon name="X" size={18} />
+                </Button>
+              </CardHeader>
+              <CardContent className="flex-1 flex flex-col p-4 space-y-4">
+                <ScrollArea className="flex-1 pr-4">
+                  <div className="space-y-3">
+                    {messages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div
+                          className={`max-w-[80%] p-3 rounded-lg ${
+                            msg.sender === 'me'
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-white/10 text-white'
+                          }`}
+                        >
+                          <p className="text-sm">{msg.text}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+                
+                <div className="space-y-2">
+                  <div className="flex gap-2 flex-wrap max-h-20 overflow-y-auto p-2 bg-white/5 rounded-lg">
+                    {SMILES.slice(0, 30).map((smile, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => insertSmile(smile)}
+                        className="text-2xl hover:scale-125 transition-transform"
+                      >
+                        {smile}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <Input
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                      placeholder="Сообщение..."
+                      className="glass-effect border-white/10"
+                    />
+                    <Button
+                      size="icon"
+                      onClick={sendMessage}
+                      className="gradient-purple-pink hover:opacity-90"
+                    >
+                      <Icon name="Send" size={18} />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </div>
 
       <div className="p-6 glass-effect border-t border-white/10">
         <div className="container mx-auto flex items-center justify-center gap-4">
-          <Button size="icon" className="h-14 w-14 rounded-full glass-effect hover:bg-white/20">
-            <Icon name="Mic" size={24} />
+          <Button
+            size="icon"
+            className={`h-14 w-14 rounded-full ${
+              isMicOn ? 'glass-effect hover:bg-white/20' : 'bg-red-500 hover:bg-red-600'
+            }`}
+            onClick={toggleMic}
+          >
+            <Icon name={isMicOn ? 'Mic' : 'MicOff'} size={24} />
           </Button>
-          <Button size="icon" className="h-14 w-14 rounded-full glass-effect hover:bg-white/20">
-            <Icon name="Video" size={24} />
+          <Button
+            size="icon"
+            className={`h-14 w-14 rounded-full ${
+              isCameraOn ? 'glass-effect hover:bg-white/20' : 'bg-red-500 hover:bg-red-600'
+            }`}
+            onClick={toggleCamera}
+          >
+            <Icon name={isCameraOn ? 'Video' : 'VideoOff'} size={24} />
           </Button>
           <Button 
             size="icon" 
             className="h-16 w-16 rounded-full bg-red-500 hover:bg-red-600"
-            onClick={() => setCurrentPage('dashboard')}
+            onClick={handleEndCall}
           >
             <Icon name="PhoneOff" size={28} />
           </Button>
-          <Button size="icon" className="h-14 w-14 rounded-full glass-effect hover:bg-white/20">
-            <Icon name="Volume2" size={24} />
+          <Button
+            size="icon"
+            className="h-14 w-14 rounded-full glass-effect hover:bg-white/20"
+            onClick={() => setShowChat(!showChat)}
+          >
+            <Icon name="MessageSquare" size={24} />
           </Button>
-          <Button size="icon" className="h-14 w-14 rounded-full glass-effect hover:bg-white/20">
-            <Icon name="MoreVertical" size={24} />
-          </Button>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button size="icon" className="h-14 w-14 rounded-full glass-effect hover:bg-white/20">
+                <Icon name="Smile" size={24} />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="glass-effect border-white/10 max-w-md">
+              <DialogHeader>
+                <DialogTitle>Smiles</DialogTitle>
+                <DialogDescription>Выберите эмодзи для быстрого ответа</DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-8 gap-2 p-4">
+                {SMILES.map((smile, idx) => (
+                  <button
+                    key={idx}
+                    className="text-3xl hover:scale-125 transition-transform p-2 hover:bg-white/10 rounded-lg"
+                  >
+                    {smile}
+                  </button>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>
@@ -377,43 +639,18 @@ export default function Index() {
             <div className="space-y-4">
               <div>
                 <Label>Имя</Label>
-                <Input defaultValue="Владимир" className="mt-2 glass-effect border-white/10" />
+                <Input defaultValue="Владимир" className="glass-effect border-white/10 mt-2" />
               </div>
               <div>
                 <Label>Фамилия</Label>
-                <Input defaultValue="Петров" className="mt-2 glass-effect border-white/10" />
+                <Input defaultValue="Петров" className="glass-effect border-white/10 mt-2" />
               </div>
               <div>
                 <Label>Email</Label>
-                <Input defaultValue="vladimir.petrov@example.com" type="email" className="mt-2 glass-effect border-white/10" />
-              </div>
-              <div>
-                <Label>Телефон</Label>
-                <Input defaultValue="+7 (999) 123-45-67" className="mt-2 glass-effect border-white/10" />
+                <Input defaultValue="vladimir.petrov@example.com" className="glass-effect border-white/10 mt-2" />
               </div>
             </div>
-
-            <Separator className="bg-white/10" />
-
-            <div className="space-y-4">
-              <h3 className="font-semibold">Статистика</h3>
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <p className="text-3xl font-bold text-primary">42</p>
-                  <p className="text-sm text-muted-foreground">Звонков</p>
-                </div>
-                <div>
-                  <p className="text-3xl font-bold text-secondary">18</p>
-                  <p className="text-sm text-muted-foreground">Контактов</p>
-                </div>
-                <div>
-                  <p className="text-3xl font-bold text-accent">3.2ч</p>
-                  <p className="text-sm text-muted-foreground">В эфире</p>
-                </div>
-              </div>
-            </div>
-
-            <Button className="w-full gradient-purple-pink hover:opacity-90">
+            <Button className="w-full gradient-purple-pink text-white hover:opacity-90">
               Сохранить изменения
             </Button>
           </CardContent>
@@ -426,12 +663,12 @@ export default function Index() {
     <div className="min-h-screen">
       <nav className="glass-effect border-b border-white/10">
         <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <Button variant="ghost" onClick={() => setCurrentPage('dashboard')}>
+          <Button variant="ghost" onClick={() => setCurrentPage('profile')}>
             <Icon name="ArrowLeft" size={20} className="mr-2" />
             Назад
           </Button>
           <span className="text-xl font-bold">Настройки</span>
-          <div className="w-20" />
+          <div className="w-20"></div>
         </div>
       </nav>
 
@@ -439,38 +676,19 @@ export default function Index() {
         <div className="space-y-6">
           <Card className="glass-effect border-white/10">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Icon name="Shield" size={24} className="text-primary" />
-                Безопасность
-              </CardTitle>
+              <CardTitle>Безопасность</CardTitle>
+              <CardDescription>Управление безопасностью аккаунта</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <Label className="text-base">Двухфакторная аутентификация</Label>
-                  <p className="text-sm text-muted-foreground">Дополнительная защита вашего аккаунта</p>
+                  <p className="font-medium">Двухфакторная аутентификация</p>
+                  <p className="text-sm text-muted-foreground">Дополнительный уровень защиты</p>
                 </div>
                 <Switch checked={twoFactorEnabled} onCheckedChange={setTwoFactorEnabled} />
               </div>
-              
-              {twoFactorEnabled && (
-                <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
-                  <div className="flex items-start gap-3">
-                    <Icon name="CheckCircle" size={20} className="text-primary mt-0.5" />
-                    <div>
-                      <p className="font-semibold">2FA активирована</p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Ваш аккаунт защищён двухфакторной аутентификацией
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <Separator className="bg-white/10" />
-
               <Button variant="outline" className="w-full border-white/20 hover:bg-white/10">
-                <Icon name="Key" size={18} className="mr-2" />
                 Изменить пароль
               </Button>
             </CardContent>
@@ -478,79 +696,37 @@ export default function Index() {
 
           <Card className="glass-effect border-white/10">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Icon name="Video" size={24} className="text-accent" />
-                Видео и аудио
-              </CardTitle>
+              <CardTitle>Видео и аудио</CardTitle>
+              <CardDescription>Настройки качества связи</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-base">HD качество видео</Label>
-                  <p className="text-sm text-muted-foreground">Требует больше трафика</p>
-                </div>
-                <Switch defaultChecked />
+              <div className="space-y-2">
+                <Label>Качество видео</Label>
+                <select className="w-full p-2 rounded-md glass-effect border-white/10 bg-transparent">
+                  <option value="hd">HD (720p)</option>
+                  <option value="fhd">Full HD (1080p)</option>
+                  <option value="auto">Авто</option>
+                </select>
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-base">Шумоподавление</Label>
-                  <p className="text-sm text-muted-foreground">Улучшает качество звука</p>
-                </div>
-                <Switch defaultChecked />
+              <div className="space-y-2">
+                <Label>Микрофон</Label>
+                <select className="w-full p-2 rounded-md glass-effect border-white/10 bg-transparent">
+                  <option>Микрофон по умолчанию</option>
+                </select>
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-base">Автоматическое включение камеры</Label>
-                  <p className="text-sm text-muted-foreground">При входящих звонках</p>
-                </div>
-                <Switch />
+              <div className="space-y-2">
+                <Label>Камера</Label>
+                <select className="w-full p-2 rounded-md glass-effect border-white/10 bg-transparent">
+                  <option>Камера по умолчанию</option>
+                </select>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="glass-effect border-white/10">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Icon name="Bell" size={24} className="text-secondary" />
-                Уведомления
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-base">Входящие звонки</Label>
-                  <p className="text-sm text-muted-foreground">Звук и push-уведомления</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-base">Сообщения</Label>
-                  <p className="text-sm text-muted-foreground">Уведомления о новых сообщениях</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-effect border-white/10 border-red-500/20">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-red-500">
-                <Icon name="AlertTriangle" size={24} />
-                Опасная зона
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button variant="outline" className="w-full border-red-500/50 text-red-500 hover:bg-red-500/10">
-                <Icon name="LogOut" size={18} className="mr-2" />
-                Выйти из аккаунта
-              </Button>
-              <Button variant="outline" className="w-full border-red-500/50 text-red-500 hover:bg-red-500/10">
-                <Icon name="Trash2" size={18} className="mr-2" />
-                Удалить аккаунт
-              </Button>
-            </CardContent>
-          </Card>
+          <Button variant="outline" className="w-full border-red-500/50 text-red-500 hover:bg-red-500/10">
+            <Icon name="LogOut" size={18} className="mr-2" />
+            Выйти из аккаунта
+          </Button>
         </div>
       </main>
     </div>
